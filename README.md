@@ -1,6 +1,6 @@
 # Altsnap for Canvas Nodes
 
-obsidian canvas nodes resizing boundaries were too tiny so i vibed this to copy AltSnap functionality but just for the canvas nodes in obsidian.  
+obsidian canvas nodes resizing boundaries were too tiny so i vibed this to copy AltSnap functionality but just for the canvas nodes. it works for mobile.
 
 Move and resize canvas groups and notes the way [AltSnap](https://github.com/RamonUnch/AltSnap) moves and resizes windows: hold Alt, then drag anywhere on the node. No hunting for tiny corner handles.
 
@@ -12,6 +12,9 @@ Move and resize canvas groups and notes the way [AltSnap](https://github.com/Ram
 - **Alignment snapping.** The edge you drag lines up with the matching edge of the nearest neighbour beside, above or below it. Only one direction snaps at a time, and only when very close. Hold Shift to toggle.
 - **Esc** cancels a drag. Every action can be undone.
 - **Alt + click on empty canvas** is swallowed, so right drag panning only happens without Alt.
+
+<img width="1476" height="936" alt="works as such" src="https://github.com/user-attachments/assets/26606d6a-dd09-4763-b41a-e1e66d66df6c" />
+
 
 ## Touch
 
