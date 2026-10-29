@@ -359,22 +359,25 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
 
     if (typeof canvas.posFromEvt !== "function") return;
     const pos = canvas.posFromEvt(e);
-    const node = this.hitTest(canvas, pos);
-    if (!node) return;
+    // Several nodes selected and the cursor inside their box: the whole selection is the target
+    const sel = this.selectionAt(canvas, pos);
+    const node = sel ? null : this.hitTest(canvas, pos);
+    if (!sel && !node) return;
     this.passContextOnce = s.clickNoDrag === "pass" && e.button === 2;
-    if (s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
+    if (node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
+    const targetId = node ? node.id : "selection";
 
     const now = Date.now();
     const lc = this.lastClick;
-    this.lastClick = { t: now, btn: e.button, id: node.id };
-    if (dbl !== "nothing" && lc && lc.btn === e.button && lc.id === node.id && now - lc.t <= s.dblClickMs) {
+    this.lastClick = { t: now, btn: e.button, id: targetId };
+    if (node && dbl !== "nothing" && lc && lc.btn === e.button && lc.id === targetId && now - lc.t <= s.dblClickMs) {
       this.lastClick = null;
       this.suppressUntil = now + 400;
       this.doDouble(canvas, node, dbl);
       return;
     }
     if (action === "nothing") { this.suppressUntil = now + 400; return; }
-    this.begin(canvas, node, pos, e, action, false);
+    this.begin(canvas, sel || node, pos, e, action, false);
   }
 
   /* ---------- touch ---------- */
@@ -393,25 +396,27 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     if (!canvas || canvas.readonly || typeof canvas.posFromEvt !== "function") return;
     if (e.target.closest && e.target.closest(".canvas-controls, .canvas-card-menu, .canvas-menu, .menu, .modal")) return;
     const pos = canvas.posFromEvt(e);
-    const node = this.hitTest(canvas, pos);
-    if (!node) return;
+    const sel = this.selectionAt(canvas, pos);
+    const node = sel ? null : this.hitTest(canvas, pos);
+    if (!sel && !node) return;
+    const target = sel || node;
     const action = s.touchAction;
     if (this.touchMode) {
       // Touch resize mode: a one finger drag on a group is ours from the start
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      if (s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
-      this.begin(canvas, node, pos, e, action, true);
+      if (node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
+      this.begin(canvas, target, pos, e, action, true);
       return;
     }
     // Long press: wait, and give the touch back to the canvas if the finger moves first
-    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, node, pos, e };
+    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target, pos, e };
     lp.timer = window.setTimeout(() => {
       if (this.lp !== lp || this.st) return;
       this.lp = null;
       // Tell the canvas its own drag from this touch is over, since it already saw the pointerdown
       try { e.target.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
-      if (s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
-      this.begin(canvas, node, pos, e, action, true);
+      if (node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
+      this.begin(canvas, target, pos, e, action, true);
       if (s.touchVibrate && navigator.vibrate) { try { navigator.vibrate(25); } catch (_) {} }
     }, s.longPressMs);
     this.lp = lp;
@@ -447,10 +452,30 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
   }
 
   /* ---------- start of a move/resize (mouse or touch) ---------- */
-  begin(canvas, node, pos, e, action, touch) {
+  // A multi selection target: the selected nodes plus the box around them, or null
+  selectionAt(canvas, pos) {
+    if (!canvas.selection || !canvas.nodes) return null;
+    const nodes = [...canvas.selection].filter((it) => it && canvas.nodes.get(it.id) === it && !isPortalId(it.id));
+    if (nodes.length < 2) return null;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const n of nodes) {
+      const b = bboxOf(n.getData());
+      minX = Math.min(minX, b.minX); minY = Math.min(minY, b.minY);
+      maxX = Math.max(maxX, b.maxX); maxY = Math.max(maxY, b.maxY);
+    }
+    if (pos.x < minX || pos.x > maxX || pos.y < minY || pos.y > maxY) return null;
+    return { nodes, box: { x: minX, y: minY, width: maxX - minX, height: maxY - minY } };
+  }
+
+  begin(canvas, target, pos, e, action, touch) {
     const s = this.settings;
     if (touch) this.passContextOnce = false;
-    const d0 = node.getData();
+    const multi = target && target.nodes ? target : null;
+    const node = multi ? null : target;
+    // For a selection, the box around it acts as the node being moved/resized
+    const d0 = multi
+      ? Object.assign({ type: multi.nodes.some((n) => n.getData().type === "group") ? "group" : "text" }, multi.box)
+      : node.getData();
     let mode = action, rx = 0, ry = 0;
     if (action === "resize") {
       const pe = pickEdge(s, d0.width, d0.height, pos.x - d0.x, pos.y - d0.y);
@@ -458,12 +483,22 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       mode = pe.mode === "move" ? "move" : pe.mode === "sym" ? "sym" : "resize";
     }
 
-    const contents = this.childrenOf(canvas, node);
-    const children = mode === "move" && s.moveChildren ? contents : [];
-    const exclude = new Set([node, ...contents]);
+    let children, exclude;
+    if (multi) {
+      // Everything selected, plus the contents of selected groups, follows the box
+      const all = new Set(multi.nodes);
+      if (s.moveChildren) for (const n of multi.nodes) for (const c of this.childrenOf(canvas, n)) all.add(c);
+      children = [...all];
+      exclude = new Set(children);
+    } else {
+      const contents = this.childrenOf(canvas, node);
+      children = mode === "move" && s.moveChildren ? contents : [];
+      exclude = new Set([node, ...contents]);
+    }
 
     this.st = {
       canvas, node, mode, rx, ry,
+      multi: !!multi,
       d0: Object.assign({}, d0),
       kids: children.map((n) => ({ n, d0: Object.assign({}, n.getData()) })),
       sticky: [],
@@ -559,7 +594,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     if (s.dragOpacity >= 0 && s.dragOpacity < 255) {
       const op = String(s.dragOpacity / 255);
       for (const n of [st.node, ...st.kids.map((k) => k.n)]) {
-        if (!n.nodeEl) continue;
+        if (!n || !n.nodeEl) continue;
         st.opacity.push({ el: n.nodeEl, prev: n.nodeEl.style.opacity });
         n.nodeEl.style.opacity = op;
       }
@@ -633,6 +668,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
 
   buildSticky() {
     const st = this.st, canvas = st.canvas;
+    if (st.multi) return;
     if (st.d0.type !== "group") return;
     const t = bboxOf(st.d0);
     const eps = 2;
@@ -673,7 +709,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       }
       L = Math.round(L); T = Math.round(T);
       const mx = L - d0.x, my = T - d0.y;
-      this.applyGeom(canvas, st.node, { x: L, y: T, width: d0.width, height: d0.height });
+      if (st.node) this.applyGeom(canvas, st.node, { x: L, y: T, width: d0.width, height: d0.height });
       for (const k of st.kids) {
         this.applyGeom(canvas, k.n, { x: k.d0.x + mx, y: k.d0.y + my, width: k.d0.width, height: k.d0.height });
       }
@@ -713,6 +749,16 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       else if (mvT) T = B - minH; else B = T + minH;
     }
     L = Math.round(L); T = Math.round(T); R = Math.round(R); B = Math.round(B);
+    if (st.multi) {
+      // Scale every node inside the selection box. Edges are mapped, so nodes that touched still touch.
+      const sx = (R - L) / d0.width, sy = (B - T) / d0.height;
+      for (const k of st.kids) {
+        const x = Math.round(L + (k.d0.x - d0.x) * sx), y = Math.round(T + (k.d0.y - d0.y) * sy);
+        const r = Math.round(L + (k.d0.x + k.d0.width - d0.x) * sx), b = Math.round(T + (k.d0.y + k.d0.height - d0.y) * sy);
+        this.applyGeom(canvas, k.n, { x, y, width: Math.max(1, r - x), height: Math.max(1, b - y) });
+      }
+      return;
+    }
     this.applyGeom(canvas, st.node, { x: L, y: T, width: R - L, height: B - T });
 
     // Sticky: drag touching edges of neighbouring groups along
@@ -736,14 +782,14 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     if (!st.started) return;
     const canvas = st.canvas;
     if (cancel) {
-      this.applyGeom(canvas, st.node, st.d0);
+      if (st.node) this.applyGeom(canvas, st.node, st.d0);
       for (const k of st.kids) this.applyGeom(canvas, k.n, k.d0);
       for (const sk of st.sticky) this.applyGeom(canvas, sk.n, sk.d0);
     } else if (typeof canvas.pushHistory === "function") {
       canvas.pushHistory(canvas.getData());
     }
     if (typeof canvas.requestSave === "function") canvas.requestSave();
-    if (!cancel && this.settings.selectAfter && typeof canvas.selectOnly === "function") canvas.selectOnly(st.node);
+    if (!cancel && st.node && this.settings.selectAfter && typeof canvas.selectOnly === "function") canvas.selectOnly(st.node);
   }
 
   doDouble(canvas, node, act) {
@@ -901,6 +947,14 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     drop("Cursor", "AltSnap \"UseCursor\".",
       { "1": "Default", "0": "No cursor change", "2": "No hand when moving", "3": "Normal cursor when resizing", "4": "Move cursor when moving" },
       () => s.cursorMode, (v) => (s.cursorMode = v));
+
+    new obsidian.Setting(el).setName("Reset to defaults").setDesc("Puts every setting back to how the plugin ships.")
+      .addButton((b) => b.setButtonText("Reset").setWarning().onClick(async () => {
+        p.settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+        await p.saveSettings();
+        p.refreshButtons();
+        this.display();
+      }));
   }
 }
 
