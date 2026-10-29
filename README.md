@@ -1,5 +1,7 @@
 # Altsnap for Canvas Nodes
 
+obsidian canvas nodes resizing boundaries were too tiny so i vibed this to copy AltSnap functionality but just for the canvas nodes in obsidian.  
+
 Move and resize canvas groups and notes the way [AltSnap](https://github.com/RamonUnch/AltSnap) moves and resizes windows: hold Alt, then drag anywhere on the node. No hunting for tiny corner handles.
 
 ## How it works
