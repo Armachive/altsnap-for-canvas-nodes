@@ -1,0 +1,10 @@
+body.cas-active, body.cas-active * { user-select: none !important; }
+body.cas-cursor-move, body.cas-cursor-move * { cursor: move !important; }
+body.cas-cursor-grab, body.cas-cursor-grab * { cursor: grabbing !important; }
+body.cas-cursor-nwse, body.cas-cursor-nwse * { cursor: nwse-resize !important; }
+body.cas-cursor-nesw, body.cas-cursor-nesw * { cursor: nesw-resize !important; }
+body.cas-cursor-ew, body.cas-cursor-ew * { cursor: ew-resize !important; }
+body.cas-cursor-ns, body.cas-cursor-ns * { cursor: ns-resize !important; }
+body.cas-cursor-all, body.cas-cursor-all * { cursor: all-scroll !important; }
+.cas-settings h3 { margin-top: 1.5em; }
+.cas-touch-btn.is-active { color: var(--interactive-accent); background-color: var(--background-modifier-hover); }
