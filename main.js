@@ -84,8 +84,6 @@ const DEFAULT_SETTINGS = {
   cursorMode: "1",
 };
 
-const CURSOR_CLASSES = ["cas-cursor-move", "cas-cursor-grab", "cas-cursor-nwse", "cas-cursor-nesw", "cas-cursor-ew", "cas-cursor-ns", "cas-cursor-all"];
-
 function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
 function isPortalId(id) { return typeof id === "string" && id.includes("||"); }
 function bboxOf(d) { return { minX: d.x, minY: d.y, maxX: d.x + d.width, maxY: d.y + d.height }; }
@@ -554,9 +552,10 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     this.lastClick = null;
     this.passContextOnce = false;
     const s = this.settings;
-    st.body.classList.add("cas-active");
+    // A full window layer for the drag: holds the cursor and stops text selection, no global CSS overrides needed
     const cls = this.cursorClass();
-    if (cls) st.body.classList.add(cls);
+    st.overlay = st.body.createDiv({ cls: "cas-overlay" + (cls ? " " + cls : "") });
+    if (st.capture !== undefined) { try { st.overlay.setPointerCapture(st.capture); } catch (_) {} }
     if (s.dragOpacity >= 0 && s.dragOpacity < 255) {
       const op = String(s.dragOpacity / 255);
       for (const n of [st.node, ...st.kids.map((k) => k.n)]) {
@@ -732,7 +731,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     this.st = null;
     if (st.raf) st.win.cancelAnimationFrame(st.raf);
     try { if (st.capture !== undefined) st.canvas.wrapperEl.releasePointerCapture(st.capture); } catch (_) {}
-    st.body.classList.remove("cas-active", ...CURSOR_CLASSES);
+    if (st.overlay) st.overlay.remove();
     for (const o of st.opacity) o.el.style.opacity = o.prev;
     if (!st.started) return;
     const canvas = st.canvas;
