@@ -26,6 +26,12 @@ Move and resize canvas groups and notes the way [AltSnap](https://github.com/Ram
 - A second finger cancels the drag so pinch zoom still works.
 - No snapping on touch, so finger drags land exactly where you put them.
 
+
+example of alt resizing the selection box itself aswell as multiple different node selections:
+<img width="1569" height="986" alt="it works gi" src="https://github.com/user-attachments/assets/b096d1d5-731d-40bd-a8af-a7a7f0091467" />
+
+
+
 ## Settings
 
 Most of AltSnap's own options that make sense on a canvas are here: hotkeys (left/right Alt, Ctrl, Shift, Win), two key combo, alternate action key, actions for all five mouse buttons plus alternate and double click actions, center and sides fractions, center resize mode, sticky resize, drag threshold, refresh/move/resize rates, opacity while dragging, cursor modes, and blacklists by group label or color.
