@@ -59,7 +59,6 @@ const DEFAULT_SETTINGS = {
   touchLongPress: true,
   longPressMs: 350,
   longPressTolerance: 10,
-  touchAction: "resize",
   touchButton: "mobile",
   touchVibrate: true,
   skipCollapsed: true,
@@ -134,7 +133,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     this.suppressUntil = 0;
     this.actedSinceKeyDown = false;
     this.lp = null;
-    this.touchMode = false;
+    this.touchPaused = false;
     this.lastClick = null;
     this.hooked = new WeakSet();
 
@@ -151,7 +150,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     });
 
     this.hookWindow(window);
-    this.addCommand({ id: "toggle-touch-mode", name: "Toggle touch resize mode", callback: () => this.toggleTouchMode() });
+    this.addCommand({ id: "toggle-touch-mode", name: "Toggle touch AltSnap", callback: () => this.toggleTouchMode() });
     const refresh = () => this.refreshButtons();
     this.app.workspace.onLayoutReady(() => {
       this.app.workspace.iterateAllLeaves((leaf) => {
@@ -391,7 +390,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       return;
     }
     this.cancelLongPress();
-    if (!s.enabled || (!this.touchMode && !s.touchLongPress)) return;
+    if (!s.enabled || !s.touchLongPress || this.touchPaused) return;
     const canvas = this.findCanvas(e.target);
     if (!canvas || canvas.readonly || typeof canvas.posFromEvt !== "function") return;
     if (e.target.closest && e.target.closest(".canvas-controls, .canvas-card-menu, .canvas-menu, .menu, .modal")) return;
@@ -399,27 +398,30 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     const sel = this.selectionAt(canvas, pos);
     const node = sel ? null : this.hitTest(canvas, pos);
     if (!sel && !node) return;
-    const target = sel || node;
-    const action = s.touchAction;
-    if (this.touchMode) {
-      // Touch resize mode: a one finger drag on a group is ours from the start
-      e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      if (node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
-      this.begin(canvas, target, pos, e, action, true);
-      return;
-    }
-    // Long press: wait, and give the touch back to the canvas if the finger moves first
-    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target, pos, e };
+    // Touch and drag = resize from where you touched. Hold still, then drag = move.
+    // A plain tap is left alone so Obsidian still selects/opens the node.
+    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target: sel || node, node, pos, e };
     lp.timer = window.setTimeout(() => {
       if (this.lp !== lp || this.st) return;
-      this.lp = null;
-      // Tell the canvas its own drag from this touch is over, since it already saw the pointerdown
-      try { e.target.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
-      if (node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(node);
-      this.begin(canvas, target, pos, e, action, true);
+      this.cancelLongPress();
+      this.activateTouch(lp, "move", null);
       if (s.touchVibrate && navigator.vibrate) { try { navigator.vibrate(25); } catch (_) {} }
     }, s.longPressMs);
     this.lp = lp;
+  }
+  // Takes over a touch the canvas has already seen
+  activateTouch(lp, action, moveEvt) {
+    const s = this.settings, canvas = lp.canvas, e = lp.e;
+    // Tell the canvas its own pan/drag from this touch is over
+    try { e.target.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
+    if (lp.node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(lp.node);
+    this.begin(canvas, lp.target, lp.pos, e, action, true);
+    if (moveEvt && this.st) {
+      // Measure the drag from here so the node doesn't jump by the distance it took to start
+      this.st.startPos = canvas.posFromEvt(moveEvt);
+      this.st.startClient = { x: moveEvt.clientX, y: moveEvt.clientY };
+      this.st.lastApplied = { x: moveEvt.clientX, y: moveEvt.clientY };
+    }
   }
   cancelLongPress() {
     if (!this.lp) return;
@@ -427,14 +429,14 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     this.lp = null;
   }
   toggleTouchMode(on) {
-    this.touchMode = on === undefined ? !this.touchMode : on;
+    this.touchPaused = on === undefined ? !this.touchPaused : !on;
     this.refreshButtons();
-    new obsidian.Notice("Touch resize mode " + (this.touchMode ? "on" : "off"), 1500);
+    new obsidian.Notice("Touch AltSnap " + (this.touchPaused ? "off" : "on"), 1500);
   }
   refreshButtons() {
     const s = this.settings;
     const show = s.enabled && (s.touchButton === "always" || (s.touchButton === "mobile" && obsidian.Platform.isMobile));
-    if (!show) this.touchMode = false;
+    if (!show) this.touchPaused = false;
     for (const leaf of this.app.workspace.getLeavesOfType("canvas")) {
       const root = leaf.view && leaf.view.containerEl;
       const controls = root && root.querySelector(".canvas-controls");
@@ -443,11 +445,11 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       if (!show) { if (grp) grp.remove(); continue; }
       if (!grp) {
         grp = controls.createDiv({ cls: "canvas-control-group cas-touch-group" });
-        const btn = grp.createDiv({ cls: "canvas-control-item cas-touch-btn", attr: { "aria-label": "Touch resize mode" } });
+        const btn = grp.createDiv({ cls: "canvas-control-item cas-touch-btn", attr: { "aria-label": "Touch AltSnap on/off" } });
         obsidian.setIcon(btn, "scaling");
         btn.addEventListener("click", () => this.toggleTouchMode());
       }
-      grp.querySelector(".cas-touch-btn").toggleClass("is-active", !!this.touchMode);
+      grp.querySelector(".cas-touch-btn").toggleClass("is-active", s.touchLongPress && !this.touchPaused);
     }
   }
 
@@ -526,7 +528,12 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
   }
 
   onPointerMove(e) {
-    if (this.lp && e.pointerId === this.lp.id && Math.hypot(e.clientX - this.lp.x, e.clientY - this.lp.y) > this.settings.longPressTolerance) this.cancelLongPress();
+    if (this.lp && e.pointerId === this.lp.id && Math.hypot(e.clientX - this.lp.x, e.clientY - this.lp.y) > this.settings.longPressTolerance) {
+      // Finger moved before the hold time: resize from where it touched down
+      const lp = this.lp;
+      this.cancelLongPress();
+      this.activateTouch(lp, "resize", e);
+    }
     const st = this.st;
     if (!st) return;
     e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
@@ -929,11 +936,10 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     toggle("Block hotkey release after action", "Stops the hotkey release from reaching Obsidian after an action.", "blockAltKeyup");
 
     new obsidian.Setting(el).setName("Touch").setHeading();
-    toggle("Long press to grab", "Hold a finger on a group, then drag. Moving before the hold time pans like normal.", "touchLongPress");
-    num("Long press time (ms)", "", "longPressMs", 100, 2000);
-    num("Long press tolerance (px)", "How far the finger can drift during the hold.", "longPressTolerance", 1, 100);
-    drop("Touch action", "What a touch grab does. Resize uses the same zones as the mouse.", { resize: "Resize", move: "Move" }, () => s.touchAction, (v) => (s.touchAction = v));
-    drop("Touch resize mode button", "Button in the canvas zoom controls. While on, a one finger drag on a group acts right away, no hold.", { mobile: "Mobile only", always: "Always", never: "Never" }, () => s.touchButton, (v) => { s.touchButton = v; p.refreshButtons(); });
+    toggle("Touch AltSnap", "Touch and drag a node to resize it from where you touched. Hold still first, then drag, to move it. Taps still work like normal. The button in the canvas zoom controls turns this off for a moment so you can pan.", "touchLongPress");
+    num("Hold time (ms)", "How long to hold still before a drag moves instead of resizes.", "longPressMs", 100, 2000);
+    num("Drag start distance (px)", "How far the finger moves before it counts as a resize drag instead of a hold.", "longPressTolerance", 1, 100);
+    drop("Touch on/off button", "Button in the canvas zoom controls that pauses touch AltSnap so one finger pans again.", { mobile: "Mobile only", always: "Always", never: "Never" }, () => s.touchButton, (v) => { s.touchButton = v; p.refreshButtons(); });
     toggle("Vibrate on grab", "", "touchVibrate");
 
     new obsidian.Setting(el).setName("Performance").setHeading();
