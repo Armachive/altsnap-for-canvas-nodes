@@ -161,6 +161,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     });
     this.registerEvent(this.app.workspace.on("layout-change", refresh));
     this.registerEvent(this.app.workspace.on("active-leaf-change", refresh));
+    this.registerEvent(this.app.workspace.on("file-open", refresh));
     this.registerEvent(this.app.workspace.on("window-open", (_ww, win) => this.hookWindow(win)));
   }
 
@@ -413,7 +414,9 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
   activateTouch(lp, action, moveEvt) {
     const s = this.settings, canvas = lp.canvas, e = lp.e;
     // Tell the canvas its own pan/drag from this touch is over
-    try { e.target.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
+    const el = e.target && e.target.isConnected ? e.target : canvas.wrapperEl;
+    try { el.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
+    try { el.dispatchEvent(new TouchEvent("touchcancel", { bubbles: true, cancelable: false })); } catch (_) {}
     if (lp.node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(lp.node);
     this.begin(canvas, lp.target, lp.pos, e, action, true);
     if (moveEvt && this.st) {
@@ -936,7 +939,8 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     toggle("Block hotkey release after action", "Stops the hotkey release from reaching Obsidian after an action.", "blockAltKeyup");
 
     new obsidian.Setting(el).setName("Touch").setHeading();
-    toggle("Touch AltSnap", "Touch and drag a node to resize it from where you touched. Hold still first, then drag, to move it. Taps still work like normal. The button in the canvas zoom controls turns this off for a moment so you can pan.", "touchLongPress");
+    new obsidian.Setting(el).setName("Touch AltSnap").setDesc("Touch and drag a node to resize it from where you touched. Hold still first, then drag, to move it. Taps still work like normal. The button in the canvas zoom controls turns this off for a moment so you can pan.")
+      .addToggle((t) => t.setValue(!!s.touchLongPress).onChange(async (v) => { s.touchLongPress = v; await save(); p.refreshButtons(); }));
     num("Hold time (ms)", "How long to hold still before a drag moves instead of resizes.", "longPressMs", 100, 2000);
     num("Drag start distance (px)", "How far the finger moves before it counts as a resize drag instead of a hold.", "longPressTolerance", 1, 100);
     drop("Touch on/off button", "Button in the canvas zoom controls that pauses touch AltSnap so one finger pans again.", { mobile: "Mobile only", always: "Always", never: "Never" }, () => s.touchButton, (v) => { s.touchButton = v; p.refreshButtons(); });
