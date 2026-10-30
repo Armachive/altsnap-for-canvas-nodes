@@ -71,7 +71,6 @@ const DEFAULT_SETTINGS = {
   // Alignment snapping
   alignEnabled: true,
   alignThreshold: 5,
-  alignThresholdTouch: 6,
   snapRelease: 2,
   shiftSnaps: true,
   gridSize: 0,
@@ -722,8 +721,9 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       st.spos = pos;
     }
     const dx = pos.x - st.startPos.x, dy = pos.y - st.startPos.y;
-    const thr = (st.touch ? s.alignThresholdTouch : s.alignThreshold) / this.scaleOf(canvas);
-    const snapOn = s.alignEnabled !== (s.shiftSnaps && this.shiftHeld(e));
+    const thr = s.alignThreshold / this.scaleOf(canvas);
+    // Touch never snaps, so finger drags stay exactly where you put them
+    const snapOn = !st.touch && s.alignEnabled !== (s.shiftSnaps && this.shiftHeld(e));
     const d0 = st.d0;
     let L = d0.x, T = d0.y, R = d0.x + d0.width, B = d0.y + d0.height;
 
@@ -916,9 +916,8 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
       .addText((t) => t.setValue(s.blacklistColors).onChange(async (v) => { s.blacklistColors = v; await save(); }));
 
     new obsidian.Setting(el).setName("Alignment snapping").setHeading();
-    toggle("Align to neighbours", "The edge you drag lines up with the matching edge of the nearest group (or note) beside, above or below it. Only one direction snaps at a time.", "alignEnabled");
+    toggle("Align to neighbours", "The edge you drag lines up with the matching edge of the nearest group (or note) beside, above or below it. Only one direction snaps at a time. Mouse only, touch never snaps.", "alignEnabled");
     num("Align range (px)", "Screen pixels. How close an edge has to be before it snaps.", "alignThreshold", 0, 200);
-    num("Align range on touch (px)", "Same, for finger drags. 0 turns snapping off on touch.", "alignThresholdTouch", 0, 200);
     num("Snap release", "Once snapped, how much further (times the range) you have to pull before it lets go. Higher = steadier.", "snapRelease", 1, 10);
     toggle("Shift toggles snapping", "Holding Shift while dragging flips snapping on/off.", "shiftSnaps");
     num("Grid size", "Round moving edges to this grid (canvas units). 0 = off.", "gridSize", 0, 1000);
