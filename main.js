@@ -152,7 +152,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     });
 
     this.hookWindow(window);
-    this.addCommand({ id: "toggle-touch-mode", name: "Toggle touch AltSnap", callback: () => this.toggleTouchMode() });
+    this.addCommand({ id: "toggle-touch-mode", name: "Toggle touch mode", callback: () => this.toggleTouchMode() });
     const refresh = () => this.refreshButtons();
     this.app.workspace.onLayoutReady(() => {
       this.app.workspace.iterateAllLeaves((leaf) => {
@@ -173,7 +173,18 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       const g = leaf.view && leaf.view.containerEl && leaf.view.containerEl.querySelector(".cas-touch-group");
       if (g) g.remove();
     }
-    if (this.st) this.finish(false);
+    if (this.st) this.finish(true);
+  }
+
+  // Runs a handler; if it throws, put things back and end the drag so the canvas never gets stuck
+  safe(fn) {
+    try { fn(); }
+    catch (err) {
+      console.error("[canvas-altsnap]", err);
+      this.cancelLongPress();
+      if (this.st) { try { this.finish(true); } catch (_) { this.st = null; } }
+      this.suppressUntil = Date.now() + 400;
+    }
   }
 
   hookWindow(win) {
@@ -182,11 +193,11 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     const opt = { capture: true, passive: false };
     this.registerDomEvent(win, "keydown", (e) => this.onKeyDown(e), opt);
     this.registerDomEvent(win, "keyup", (e) => this.onKeyUp(e), opt);
-    this.registerDomEvent(win, "blur", () => this.onBlur(), opt);
+    this.registerDomEvent(win, "blur", (e) => { if (e.target === win) this.onBlur(); }, opt);
     this.registerDomEvent(win, "pointerdown", (e) => this.onPointerDown(e), opt);
-    this.registerDomEvent(win, "pointermove", (e) => this.onPointerMove(e), opt);
-    this.registerDomEvent(win, "pointerup", (e) => this.onPointerUp(e), opt);
-    this.registerDomEvent(win, "pointercancel", (e) => this.onPointerUp(e), opt);
+    this.registerDomEvent(win, "pointermove", (e) => this.safe(() => this.onPointerMove(e)), opt);
+    this.registerDomEvent(win, "pointerup", (e) => this.safe(() => this.onPointerUp(e)), opt);
+    this.registerDomEvent(win, "pointercancel", (e) => this.safe(() => this.onPointerUp(e)), opt);
     for (const t of ["mousedown", "mousemove", "mouseup", "contextmenu", "auxclick", "click", "dblclick", "touchstart", "touchmove", "touchend"]) {
       this.registerDomEvent(win, t, (e) => this.onBlockable(e), opt);
     }
@@ -387,16 +398,16 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     const s = this.settings;
     if (!e.isPrimary && !this.st) { this.cancelLongPress(); return; }
     if (this.st) {
-      // A second finger cancels a touch drag so pinch zoom stays usable
+      // A second finger cancels a touch drag and goes on to the canvas, so pinch zoom works
+      if (this.st.touch && e.pointerId !== this.st.pointerId) { this.finish(true); return; }
       e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
-      if (this.st.touch && e.pointerId !== this.st.pointerId) { this.finish(true); this.suppressUntil = Date.now() + 400; }
       return;
     }
     this.cancelLongPress();
     if (!s.enabled || !s.touchLongPress || this.touchPaused) return;
     const canvas = this.findCanvas(e.target);
     if (!canvas || canvas.readonly || typeof canvas.posFromEvt !== "function") return;
-    if (e.target.closest && e.target.closest(".canvas-controls, .canvas-card-menu, .canvas-menu, .menu, .modal")) return;
+    if (e.target.closest && e.target.closest(".canvas-controls, .canvas-card-menu, .canvas-menu, .menu, .modal, .canvas-node-connection-point, .is-editing, [contenteditable=\"true\"], input, textarea, .canvas-group-label")) return;
     const pos = canvas.posFromEvt(e);
     const sel = this.selectionAt(canvas, pos);
     const node = sel ? null : this.hitTest(canvas, pos);
@@ -404,12 +415,12 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     // Touch and drag = resize from where you touched. Hold still, then drag = move.
     // A plain tap is left alone so Obsidian still selects/opens the node.
     const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target: sel || node, node, pos, e };
-    lp.timer = window.setTimeout(() => {
+    lp.timer = window.setTimeout(() => this.safe(() => {
       if (this.lp !== lp || this.st) return;
       this.cancelLongPress();
       this.activateTouch(lp, "move", null);
       if (s.touchVibrate && navigator.vibrate) { try { navigator.vibrate(25); } catch (_) {} }
-    }, s.longPressMs);
+    }), s.longPressMs);
     this.lp = lp;
   }
   // Takes over a touch the canvas has already seen
@@ -556,7 +567,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       if (dist < this.settings.dragThreshold) return;
       this.start();
     }
-    if (!st.raf) st.raf = st.win.requestAnimationFrame(() => this.tick());
+    if (!st.raf) st.raf = st.win.requestAnimationFrame(() => this.safe(() => this.tick()));
   }
 
   tick() {
@@ -566,7 +577,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     const s = this.settings;
     const now = Date.now();
     if (s.refreshRate > 0 && now - st.lastTime < s.refreshRate) {
-      st.raf = st.win.requestAnimationFrame(() => this.tick());
+      st.raf = st.win.requestAnimationFrame(() => this.safe(() => this.tick()));
       return;
     }
     const e = st.lastEvt;
@@ -585,7 +596,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       if (st) { e.preventDefault(); e.stopPropagation(); }
       return;
     }
-    e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation();
+    if (!st.touch) { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); }
     if (st.started && e.type === "pointerup") this.update(e);
     const passContext = this.passContextOnce && !st.started;
     this.finish(false);
@@ -607,8 +618,11 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
       const op = String(s.dragOpacity / 255);
       for (const n of [st.node, ...st.kids.map((k) => k.n)]) {
         if (!n || !n.nodeEl) continue;
-        st.opacity.push({ el: n.nodeEl, prev: n.nodeEl.style.opacity });
-        n.nodeEl.style.opacity = op;
+        const el = n.nodeEl;
+        if (typeof el.setCssProps === "function") el.setCssProps({ "--cas-drag-opacity": op });
+        else el.style.setProperty("--cas-drag-opacity", op);
+        el.addClass("cas-dragging");
+        st.opacity.push(el);
       }
     }
   }
@@ -806,7 +820,7 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     if (st.raf) st.win.cancelAnimationFrame(st.raf);
     try { if (st.capture !== undefined) st.canvas.wrapperEl.releasePointerCapture(st.capture); } catch (_) {}
     if (st.overlay) st.overlay.remove();
-    for (const o of st.opacity) o.el.style.opacity = o.prev;
+    for (const el of st.opacity) el.removeClass("cas-dragging");
     if (!st.started) return;
     const canvas = st.canvas;
     if (cancel) {
@@ -883,6 +897,7 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
           if (v === "" || !isFinite(n)) return;
           s[key] = clamp(n, lo, hi); await save();
         });
+        t.inputEl.addEventListener("blur", () => t.setValue(String(s[key])));
       });
     const slider = (name, desc, key, lo, hi, step) => new obsidian.Setting(el).setName(name).setDesc(desc)
       .addSlider((sl) => sl.setLimits(lo, hi, step).setValue(s[key]).setDynamicTooltip()
@@ -891,7 +906,6 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(el).setName("Enabled").setDesc("Master switch. There is also a command to toggle this.")
       .addToggle((t) => t.setValue(!!s.enabled).onChange(async (v) => { s.enabled = v; await save(); p.refreshButtons(); }));
 
-    new obsidian.Setting(el).setName("General").setHeading();
     drop("Targets", "What gets grabbed under the cursor.",
       { nodesFirst: "Notes first, then innermost group", groups: "Groups only" }, () => s.targetMode, (v) => (s.targetMode = v));
     drop("Nested groups", "Which group is picked when groups are inside each other.",
