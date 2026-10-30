@@ -7,3 +7,4 @@
 .cas-overlay.cas-cursor-ns { cursor: ns-resize; }
 .cas-overlay.cas-cursor-all { cursor: all-scroll; }
 .cas-touch-btn.is-active { color: var(--interactive-accent); background-color: var(--background-modifier-hover); }
+.canvas-node.cas-dragging { opacity: var(--cas-drag-opacity, 1); }
