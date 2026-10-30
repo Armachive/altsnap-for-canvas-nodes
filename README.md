@@ -10,7 +10,7 @@ Move and resize canvas groups and notes the way [AltSnap](https://github.com/Ram
 - **Alt + left drag** moves. Groups take everything inside them along.
 - **Notes first.** If the cursor is over a note, the note is grabbed. Otherwise the innermost group under the cursor is grabbed, so nested groups behave.
 - **Selections.** With several nodes selected (box select or Shift click), Alt + drag inside the selection box moves or resizes the whole selection as one box. Everything inside scales with it. Outside the box, Alt + drag still grabs single nodes like normal.
-- **Alignment snapping.** The edge you drag lines up with the matching edge of the nearest neighbour beside, above or below it. Only one direction snaps at a time, and only when very close. Hold Shift to toggle.
+- **Alignment snapping.** The edge you drag lines up with the matching edge of the nearest neighbour beside, above or below it. Only one direction snaps at a time, and only when very close. Hold Shift to toggle. Once snapped it holds steady until you pull clearly away.
 - **Esc** cancels a drag. Every action can be undone.
 - **Alt + click on empty canvas** is swallowed, so right drag panning only happens without Alt.
 

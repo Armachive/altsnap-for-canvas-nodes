@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS = {
   longPressTolerance: 10,
   touchButton: "mobile",
   touchVibrate: true,
+  touchSmoothing: 0.3,
   skipCollapsed: true,
   minWidth: 60,
   minHeight: 60,
@@ -70,6 +71,8 @@ const DEFAULT_SETTINGS = {
   // Alignment snapping
   alignEnabled: true,
   alignThreshold: 5,
+  alignThresholdTouch: 6,
+  snapRelease: 2,
   shiftSnaps: true,
   gridSize: 0,
   stickyResize: "off",
@@ -660,15 +663,24 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
   // Finds the single closest alignment among the given edges, so only one axis snaps at a time.
   // Left/right edges align with the neighbours above/below, top/bottom edges with the neighbours beside it.
   bestAlign(box, edges, thr) {
+    const st = this.st;
+    // Stay on the current snap until the edge is pulled clearly away from it.
+    // Without this, small wobble right at the edge of the range makes it flicker on and off.
+    const lock = st.snapLock;
+    if (lock && edges.includes(lock.edge)) {
+      const d = lock.v - box[lock.edge];
+      if (Math.abs(d) <= thr * Math.max(1, this.settings.snapRelease)) return { edge: lock.edge, d };
+    }
     const vn = this.nearestNeighbors(box, true), hn = this.nearestNeighbors(box, false);
     let best = null;
     for (const edge of edges) {
       const nbs = edge === "minX" || edge === "maxX" ? vn : hn;
       for (const o of nbs) {
         const d = o[edge] - box[edge];
-        if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { edge, d };
+        if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { edge, d, v: o[edge] };
       }
     }
+    st.snapLock = best ? { edge: best.edge, v: best.v } : null;
     return best;
   }
   grid(v) {
@@ -702,9 +714,15 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
   /* ---------- the actual move/resize ---------- */
   update(e) {
     const st = this.st, s = this.settings, canvas = st.canvas;
-    const pos = canvas.posFromEvt(e);
+    let pos = canvas.posFromEvt(e);
+    if (st.touch && s.touchSmoothing > 0) {
+      // Ease toward the finger instead of jumping to it, which irons out digitizer wobble
+      const k = clamp(s.touchSmoothing, 0, 0.9), prev = st.spos || st.startPos;
+      pos = { x: prev.x + (pos.x - prev.x) * (1 - k), y: prev.y + (pos.y - prev.y) * (1 - k) };
+      st.spos = pos;
+    }
     const dx = pos.x - st.startPos.x, dy = pos.y - st.startPos.y;
-    const thr = s.alignThreshold / this.scaleOf(canvas);
+    const thr = (st.touch ? s.alignThresholdTouch : s.alignThreshold) / this.scaleOf(canvas);
     const snapOn = s.alignEnabled !== (s.shiftSnaps && this.shiftHeld(e));
     const d0 = st.d0;
     let L = d0.x, T = d0.y, R = d0.x + d0.width, B = d0.y + d0.height;
@@ -900,6 +918,8 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     new obsidian.Setting(el).setName("Alignment snapping").setHeading();
     toggle("Align to neighbours", "The edge you drag lines up with the matching edge of the nearest group (or note) beside, above or below it. Only one direction snaps at a time.", "alignEnabled");
     num("Align range (px)", "Screen pixels. How close an edge has to be before it snaps.", "alignThreshold", 0, 200);
+    num("Align range on touch (px)", "Same, for finger drags. 0 turns snapping off on touch.", "alignThresholdTouch", 0, 200);
+    num("Snap release", "Once snapped, how much further (times the range) you have to pull before it lets go. Higher = steadier.", "snapRelease", 1, 10);
     toggle("Shift toggles snapping", "Holding Shift while dragging flips snapping on/off.", "shiftSnaps");
     num("Grid size", "Round moving edges to this grid (canvas units). 0 = off.", "gridSize", 0, 1000);
     drop("Sticky resize", "AltSnap \"Resize other snapped windows\". Touching neighbour groups resize along.",
@@ -945,6 +965,7 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     num("Drag start distance (px)", "How far the finger moves before it counts as a resize drag instead of a hold.", "longPressTolerance", 1, 100);
     drop("Touch on/off button", "Button in the canvas zoom controls that pauses touch AltSnap so one finger pans again.", { mobile: "Mobile only", always: "Always", never: "Never" }, () => s.touchButton, (v) => { s.touchButton = v; p.refreshButtons(); });
     toggle("Vibrate on grab", "", "touchVibrate");
+    slider("Touch smoothing", "Irons out finger wobble so small adjustments are steadier. 0 = off, higher = smoother but trails the finger a little.", "touchSmoothing", 0, 0.9, 0.05);
 
     new obsidian.Setting(el).setName("Performance").setHeading();
     num("Drag threshold (px)", "Pixels to move before the action starts.", "dragThreshold", 0, 100);
