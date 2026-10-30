@@ -24,6 +24,7 @@ Move and resize canvas groups and notes the way [AltSnap](https://github.com/Ram
 - **Tap** works like normal, so you can still select and open nodes.
 - **On/off button** in the canvas zoom controls pauses touch AltSnap so one finger pans again.
 - A second finger cancels the drag so pinch zoom still works.
+- No snapping on touch, so finger drags land exactly where you put them.
 
 ## Settings
 
