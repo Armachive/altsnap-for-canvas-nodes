@@ -409,12 +409,12 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     if (!canvas || canvas.readonly || typeof canvas.posFromEvt !== "function") return;
     if (e.target.closest && e.target.closest(".canvas-controls, .canvas-card-menu, .canvas-menu, .menu, .modal, .canvas-node-connection-point, .is-editing, [contenteditable=\"true\"], input, textarea, .canvas-group-label")) return;
     const pos = canvas.posFromEvt(e);
-    const sel = this.selectionAt(canvas, pos);
-    const node = sel ? null : this.hitTest(canvas, pos);
-    if (!sel && !node) return;
+    // Touch only acts on what is already selected. Anything else stays normal canvas use.
+    const target = this.touchTarget(canvas, pos);
+    if (!target) return;
     // Touch and drag = resize from where you touched. Hold still, then drag = move.
     // A plain tap is left alone so Obsidian still selects/opens the node.
-    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target: sel || node, node, pos, e };
+    const lp = { id: e.pointerId, x: e.clientX, y: e.clientY, canvas, target, pos, e };
     lp.timer = window.setTimeout(() => this.safe(() => {
       if (this.lp !== lp || this.st) return;
       this.cancelLongPress();
@@ -423,14 +423,26 @@ class CanvasAltSnapPlugin extends obsidian.Plugin {
     }), s.longPressMs);
     this.lp = lp;
   }
+  // The selection under a finger: the multi selection box, or the one selected node
+  touchTarget(canvas, pos) {
+    const sel = this.selectionAt(canvas, pos);
+    if (sel) return sel;
+    if (!canvas.selection || canvas.selection.size !== 1) return null;
+    const [n] = canvas.selection;
+    if (!n || canvas.nodes.get(n.id) !== n) return null;
+    const d = n.getData();
+    if (this.blacklisted(d)) return null;
+    if (this.settings.targetMode === "groups" && d.type !== "group") return null;
+    if (pos.x < d.x || pos.x > d.x + d.width || pos.y < d.y || pos.y > d.y + d.height) return null;
+    return n;
+  }
   // Takes over a touch the canvas has already seen
   activateTouch(lp, action, moveEvt) {
-    const s = this.settings, canvas = lp.canvas, e = lp.e;
+    const canvas = lp.canvas, e = lp.e;
     // Tell the canvas its own pan/drag from this touch is over
     const el = e.target && e.target.isConnected ? e.target : canvas.wrapperEl;
     try { el.dispatchEvent(new PointerEvent("pointercancel", { pointerId: e.pointerId, pointerType: "touch", isPrimary: true, bubbles: true })); } catch (_) {}
     try { el.dispatchEvent(new TouchEvent("touchcancel", { bubbles: true, cancelable: false })); } catch (_) {}
-    if (lp.node && s.selectOnGrab && typeof canvas.selectOnly === "function") canvas.selectOnly(lp.node);
     this.begin(canvas, lp.target, lp.pos, e, action, true);
     if (moveEvt && this.st) {
       // Measure the drag from here so the node doesn't jump by the distance it took to start
@@ -972,7 +984,7 @@ class CanvasAltSnapSettingTab extends obsidian.PluginSettingTab {
     toggle("Block hotkey release after action", "Stops the hotkey release from reaching Obsidian after an action.", "blockAltKeyup");
 
     new obsidian.Setting(el).setName("Touch").setHeading();
-    new obsidian.Setting(el).setName("Touch AltSnap").setDesc("Touch and drag a node to resize it from where you touched. Hold still first, then drag, to move it. Taps still work like normal. The button in the canvas zoom controls turns this off for a moment so you can pan.")
+    new obsidian.Setting(el).setName("Touch AltSnap").setDesc("Tap a node or group to select it first. Then touch and drag it to resize from where you touched, or hold still and drag to move it. Anything not selected works like normal. The button in the canvas zoom controls turns this off for a moment.")
       .addToggle((t) => t.setValue(!!s.touchLongPress).onChange(async (v) => { s.touchLongPress = v; await save(); p.refreshButtons(); }));
     num("Hold time (ms)", "How long to hold still before a drag moves instead of resizes.", "longPressMs", 100, 2000);
     num("Drag start distance (px)", "How far the finger moves before it counts as a resize drag instead of a hold.", "longPressTolerance", 1, 100);

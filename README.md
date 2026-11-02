@@ -19,9 +19,9 @@ Move and resize canvas groups and notes the way [AltSnap](https://github.com/Ram
 
 ## Touch
 
-- **Touch and drag** a note, group or selection to resize it from where you touched, using the same zones as the mouse.
+- **Select first.** Touch only acts on the note, group or selection that is already selected. Tap to select it. Anything not selected works like normal.
+- **Touch and drag** the selected item to resize it from where you touched, using the same zones as the mouse.
 - **Hold still, then drag** to move it instead. Holding never resizes.
-- **Tap** works like normal, so you can still select and open nodes.
 - **On/off button** in the canvas zoom controls pauses touch AltSnap so one finger pans again.
 - A second finger cancels the drag so pinch zoom still works.
 - No snapping on touch, so finger drags land exactly where you put them.

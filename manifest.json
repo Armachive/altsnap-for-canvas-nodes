@@ -1,7 +1,7 @@
 {
   "id": "canvas-altsnap",
   "name": "Altsnap for Canvas Nodes",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "minAppVersion": "1.4.0",
   "description": "Move and resize canvas groups and notes AltSnap style. Hold Alt and drag anywhere on a node, no corner hunting. Touch support included.",
   "author": "Armachive",
